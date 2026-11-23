@@ -7,12 +7,19 @@
 require('dotenv').config({ quiet: true });
 
 const { createApp } = require('./src/createApp');
+const { createCheckinsRepo } = require('./src/checkinsRepo');
+const { createKrClient, createGoalsClient } = require('./src/internalClients');
+const { createEvents } = require('./src/events');
 const { createVerifier } = require('./src/auth');
 
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:8080')
     .split(',').map((o) => o.trim()).filter(Boolean);
 
 module.exports = createApp({
+    repo: createCheckinsRepo(),
+    kr: createKrClient(),
+    goals: createGoalsClient(),
+    events: createEvents(),
     verify: createVerifier(),
     allowedOrigins
 });

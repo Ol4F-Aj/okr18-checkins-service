@@ -7,8 +7,11 @@ const express = require('express');
 const cors = require('cors');
 const { requireUser } = require('./auth');
 const { sendError } = require('./http');
+const { createCheckinsController } = require('./checkinsController');
+const { DependencyError } = require('./internalClients');
 
-function createApp({ verify, allowedOrigins = [] }) {
+// Express 5 passes rejected promises from async handlers to the error handler
+function createApp({ repo, kr, goals, events, verify, now, allowedOrigins = [] }) {
     const app = express();
     app.disable('x-powered-by');
 
@@ -38,9 +41,11 @@ function createApp({ verify, allowedOrigins = [] }) {
     // Public: lets deploy.sh and the team check the Lambda is alive
     app.get('/api/check-ins/health', (req, res) => res.status(200).json({ status: 'ok', service: 'checkins' }));
 
-    // Every route below needs a login. Check-in routes are added in the next steps.
+    const checkins = createCheckinsController({ repo, kr, goals, events, now });
     const router = express.Router();
-    router.use(requireUser(verify));
+    router.use(requireUser(verify));                     // every route below needs a login
+    router.post('/check-ins', checkins.logCheckIn);
+    router.get('/check-ins', checkins.listCheckIns);
     app.use('/api', router);
 
     app.use((req, res) => sendError(res, 404, 'ROUTE_NOT_FOUND', 'Route not found.'));
@@ -49,6 +54,10 @@ function createApp({ verify, allowedOrigins = [] }) {
     app.use((error, req, res, next) => {
         if (error.type === 'entity.parse.failed') return sendError(res, 400, 'VALIDATION_ERROR', 'Request body is not valid JSON.');
         if (error.type === 'entity.too.large') return sendError(res, 413, 'PAYLOAD_TOO_LARGE', 'Request body is too large.');
+        if (error instanceof DependencyError) {
+            console.error(JSON.stringify({ service: 'checkins', dependency: error.message }));
+            return sendError(res, 503, 'DEPENDENCY_UNAVAILABLE', 'Another service is not answering. Try again shortly.');
+        }
         console.error(error);
         return sendError(res, 500, 'INTERNAL_ERROR', 'An unexpected server error occurred.');
     });
