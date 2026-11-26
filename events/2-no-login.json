@@ -1,0 +1,15 @@
+{
+  "version": "2.0",
+  "rawPath": "/api/check-ins",
+  "rawQueryString": "krId=KR-00000000-0000-0000-0000-000000000000",
+  "queryStringParameters": { "krId": "KR-00000000-0000-0000-0000-000000000000" },
+  "headers": {},
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/check-ins",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "isBase64Encoded": false
+}

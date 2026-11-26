@@ -1,0 +1,14 @@
+{
+  "version": "2.0",
+  "rawPath": "/api/check-ins/health",
+  "rawQueryString": "",
+  "headers": {},
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/check-ins/health",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "isBase64Encoded": false
+}
