@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------
 // Builds the Check-ins Express app from its parts. app.js passes the
 // real AWS-backed parts; the tests pass fakes.
-// Order: log -> CORS -> JSON only -> body (10 kB) -> health -> login -> routes -> 404 -> errors
+// Order: log -> security headers -> CORS -> rate limit -> JSON only -> body (10 kB)
+//        -> health -> login -> routes -> 404 -> errors
 // ---------------------------------------------------------------
 const express = require('express');
 const cors = require('cors');
@@ -9,9 +10,10 @@ const { requireUser } = require('./auth');
 const { sendError } = require('./http');
 const { createCheckinsController } = require('./checkinsController');
 const { DependencyError } = require('./internalClients');
+const { securityHeaders, rateLimit } = require('./protect');
 
 // Express 5 passes rejected promises from async handlers to the error handler
-function createApp({ repo, kr, goals, events, verify, now, allowedOrigins = [] }) {
+function createApp({ repo, kr, goals, events, verify, now, allowedOrigins = [], rateLimitMax }) {
     const app = express();
     app.disable('x-powered-by');
 
@@ -27,7 +29,9 @@ function createApp({ repo, kr, goals, events, verify, now, allowedOrigins = [] }
         next();
     });
 
-    app.use(cors({ origin: allowedOrigins }));
+    app.use(securityHeaders);                            // on every answer, errors too
+    app.use(cors({ origin: allowedOrigins }));           // answers the browser's OPTIONS preflight itself
+    app.use(rateLimit({ max: rateLimitMax, service: 'checkins' }));   // 429 after the limit (per IP, 60 s)
 
     // Bodies must be JSON: anything else on POST/PATCH is 415
     app.use((req, res, next) => {

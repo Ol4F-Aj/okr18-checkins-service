@@ -148,6 +148,42 @@ test('event cannot be published: 503 and the check-in is taken back', async () =
     assert.equal(w.repo.rows.size, 0);
 });
 
+test('security headers are on every answer, errors too', async () => {
+    const { app } = world();
+    const server = app.listen(0);
+    try {
+        const base = `http://127.0.0.1:${server.address().port}/api/check-ins`;
+        for (const res of [await fetch(`${base}/health`), await fetch(`${base}?krId=${KR1}`)]) {   // 200 and 401
+            assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+            assert.equal(res.headers.get('x-frame-options'), 'DENY');
+            assert.match(res.headers.get('content-security-policy'), /default-src 'none'/);
+            assert.equal(res.headers.get('cache-control'), 'no-store');
+        }
+    } finally {
+        server.close();
+    }
+});
+
+test('rate limit: request 4 of 3 gets 429, and a fake X-Forwarded-For does not help', async () => {
+    const w = world();
+    const app = createApp({ ...w, verify: fakeVerify, rateLimitMax: 3 });
+    const server = app.listen(0);
+    try {
+        const url = `http://127.0.0.1:${server.address().port}/api/check-ins/health`;
+        const seen = [];
+        for (let i = 0; i < 3; i += 1) seen.push((await fetch(url)).status);
+        const fourth = await fetch(url);
+        const faked = await fetch(url, { headers: { 'x-forwarded-for': '9.9.9.9' } });
+        assert.deepEqual(seen, [200, 200, 200]);
+        assert.equal(fourth.status, 429);
+        assert.ok(Number(fourth.headers.get('retry-after')) > 0);
+        assert.equal((await fourth.json()).error.code, 'RATE_LIMITED');
+        assert.equal(faked.status, 429);
+    } finally {
+        server.close();
+    }
+});
+
 test('history: my check-ins newest first, another user sees none', async () => {
     let t = 0;
     const w = world();
