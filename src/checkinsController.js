@@ -37,13 +37,19 @@ function createCheckinsController({ repo, kr, goals, events, now = () => new Dat
         const valueError = checkValue(body.value, keyResult);
         if (valueError) return sendError(res, 400, 'VALIDATION_ERROR', valueError);
 
+        // previousValue: my own latest check-in, else the key result's current.
+        // Not always kr.current: Key Results applies events a moment later, so two quick
+        // check-ins would both see the old current and an undo would restore the wrong value.
+        const [latest] = await repo.listByKr(body.krId, userId, 1);
+        const previousValue = latest ? latest.value : keyResult.current;
+
         const checkIn = {
             checkInId: `CI-${randomUUID()}`,                 // the server creates the id
             userId,
             krId: body.krId,
             goalId: keyResult.goalId,
             value: body.value,
-            previousValue: keyResult.current,                // lets an undo put it back
+            previousValue,                                   // lets an undo put it back
             note: typeof body.note === 'string' ? body.note.trim() : '',
             createdAt: now().toISOString()
         };

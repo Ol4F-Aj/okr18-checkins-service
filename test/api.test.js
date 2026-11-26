@@ -67,6 +67,17 @@ test('log a check-in: 201, saved, and check-in.logged published with previousVal
     assert.deepEqual(w.events.sent, [{ type: 'check-in.logged', userId: 'user-a', data: { krId: KR1, value: 5, previousValue: 2 } }]);
 });
 
+test('two quick check-ins: the second one\'s previousValue is the first one\'s value', async () => {
+    // Key Results has not applied the first event yet: kr-internal still says current = 2
+    let t = 0;
+    const w = world();
+    w.app = createApp({ ...w, verify: fakeVerify, now: () => new Date(Date.UTC(2026, 10, 1) + (t += 60000)) });
+    await call(w.app, 'POST', '/api/check-ins', { token: 'token-a', body: { krId: KR1, value: 4 } });
+    const second = await call(w.app, 'POST', '/api/check-ins', { token: 'token-a', body: { krId: KR1, value: 7 } });
+    assert.equal(second.body.previousValue, 4);
+    assert.deepEqual(w.events.sent[1].data, { krId: KR1, value: 7, previousValue: 4 });
+});
+
 test('the owner comes from the token, never the body', async () => {
     const w = world();
     const res = await call(w.app, 'POST', '/api/check-ins', { token: 'token-a', body: { krId: KR1, value: 3, userId: 'user-evil' } });

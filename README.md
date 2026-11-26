@@ -15,8 +15,8 @@ What this service must provide is in section 5 of the
 | Project layout, health route, token check (`src/auth.js` from Goals) | done |
 | Rules C1, C2 (`src/rules.js`, tested) | done |
 | Check-in routes, `CheckIns` table, publish `check-in.logged` | done |
-| `scripts/deploy.sh` for Floci | next |
-| Undo (`check-in.undone`), queue `checkins-inbox` | to do |
+| `scripts/deploy.sh` for Floci, `checkins-role`, end-to-end test | done |
+| Undo (`check-in.undone`), queue `checkins-inbox` | next |
 | Evidence uploads (S3 presigned POST, 2 MB, image/PDF) | to do |
 | Weekly digest (SES + Scheduler, Mondays 08:00 Cairo) | to do |
 | Admin API (`admin` group only) | to do |
@@ -55,6 +55,11 @@ src/internalClients.js calls kr-internal and goals-internal (direct Lambda invok
 src/events.js          publishes to SNS okr-events
 src/auth.js            Cognito token -> req.user (copied unchanged from Goals)
 src/http.js            the team error shape
+infra/iam/             checkins-role policy (least privilege) and Lambda trust policy
+scripts/deploy.sh      creates or updates everything on Floci
+scripts/zip-lambda.js  builds lambda.zip (no .env, no tests)
+scripts/e2e.sh         end-to-end test on Floci through API Gateway with a real login
+events/                saved Lambda events for testing
 test/                  rules, endpoint and token tests (npm test)
 test-support/fakes.js  in-memory DynamoDB, Key Results, Goals and SNS for the tests
 ```
@@ -65,3 +70,21 @@ test-support/fakes.js  in-memory DynamoDB, Key Results, Goals and SNS for the te
 npm install
 npm test
 ```
+
+## Deploy to Floci
+
+1. Docker Desktop running, Floci started (`okr18-frontend`: `docker compose -f infra/floci/docker-compose.yml up -d`).
+2. Shared base done once (`okr18-frontend`: `bash infra/shared-setup.sh`), or simply run `bash infra/deploy-all.sh` there:
+   it deploys this service too when this repo sits next to `okr18-frontend`.
+3. From this folder in Git Bash: `bash scripts/deploy.sh`
+
+The last step prints the health answer (200) and a request without login (401).
+With Goals and Key Results deployed too, `bash scripts/e2e.sh` runs the whole flow:
+check-in refused on a Draft goal (409), Activate, two check-ins, Key Results' `current` moves, Achieve.
+
+## AWS services used here
+
+Lambda (`checkins-api`), DynamoDB (table `CheckIns`, KMS-encrypted, indexes `krId-createdAt-index` and
+`userId-createdAt-index`), API Gateway (4 routes on `okr18-api`), SNS (`check-in.logged` on `okr-events`),
+CloudWatch Logs (kept 7 days), IAM (`checkins-role`: own table, publish to `okr-events`,
+invoke only `kr-internal` and `goals-internal`, own logs).
