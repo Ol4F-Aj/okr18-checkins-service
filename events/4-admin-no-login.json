@@ -1,0 +1,14 @@
+{
+  "version": "2.0",
+  "rawPath": "/api/admin/users",
+  "rawQueryString": "",
+  "headers": {},
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/admin/users",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "isBase64Encoded": false
+}

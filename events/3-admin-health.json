@@ -1,0 +1,14 @@
+{
+  "version": "2.0",
+  "rawPath": "/api/admin/health",
+  "rawQueryString": "",
+  "headers": {},
+  "requestContext": {
+    "http": {
+      "method": "GET",
+      "path": "/api/admin/health",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "isBase64Encoded": false
+}

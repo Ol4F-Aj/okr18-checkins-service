@@ -58,7 +58,26 @@ function fakeEvents() {
 async function fakeVerify(token) {
     const m = /^token-(\w+)$/.exec(token);
     if (!m) throw new Error('bad token');
-    return { sub: `user-${m[1]}`, 'cognito:groups': ['user'] };
+    // "token-admin" is in the admin group, like a user added with admin-add-user-to-group
+    return { sub: `user-${m[1]}`, 'cognito:groups': m[1] === 'admin' ? ['user', 'admin'] : ['user'] };
 }
 
-module.exports = { fakeRepo, fakeKr, fakeGoals, fakeEvents, fakeVerify };
+// Stand-in for Cognito's user list (state.down = Cognito not answering)
+function fakeDirectory() {
+    const state = {
+        down: false,
+        users: [
+            { userId: 'user-a', email: 'a@okr18.test', status: 'CONFIRMED', enabled: true, admin: false, createdAt: '2026-11-01T10:00:00.000Z' },
+            { userId: 'user-admin', email: 'admin@okr18.test', status: 'CONFIRMED', enabled: true, admin: true, createdAt: '2026-11-02T10:00:00.000Z' }
+        ]
+    };
+    return {
+        state,
+        async listUsers() {
+            if (state.down) throw new DependencyError('Cognito could not be reached (test).');
+            return structuredClone(state.users);
+        }
+    };
+}
+
+module.exports = { fakeRepo, fakeKr, fakeGoals, fakeEvents, fakeVerify, fakeDirectory };

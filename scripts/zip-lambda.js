@@ -5,7 +5,7 @@ const path = require('path');
 const zlib = require('zlib');
 
 const root = path.join(__dirname, '..');
-const include = ['app.js', 'package.json', 'handlers', 'src', 'node_modules'];
+const include = ['app.js', 'adminApp.js', 'package.json', 'handlers', 'src', 'node_modules'];
 const output = path.join(root, 'lambda.zip');
 
 if (!fs.existsSync(path.join(root, 'node_modules', 'serverless-http'))) {
