@@ -7,7 +7,7 @@
 // on a PC the "floci" AWS profile does.
 // ---------------------------------------------------------------
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
 const KR_INDEX = 'krId-createdAt-index';
 const USER_INDEX = 'userId-createdAt-index';
@@ -26,9 +26,30 @@ function createCheckinsRepo({ table = process.env.CHECKINS_TABLE, client } = {})
         return checkIn;
     }
 
-    // Remove one (used when the event could not be published, so nothing is half done)
-    async function remove(checkInId) {
-        await db.send(new DeleteCommand({ TableName: table, Key: { checkInId } }));
+    // Read one by id (the controller checks the owner)
+    async function get(checkInId) {
+        const out = await db.send(new GetCommand({ TableName: table, Key: { checkInId } }));
+        return out.Item || null;
+    }
+
+    // Remove one. With userId (undo) the delete only happens if the row is still the caller's:
+    // false means it was already gone. Without userId: rollback when an event could not be sent.
+    async function remove(checkInId, userId) {
+        try {
+            await db.send(new DeleteCommand({
+                TableName: table,
+                Key: { checkInId },
+                ...(userId ? {
+                    ConditionExpression: '#u = :u',
+                    ExpressionAttributeNames: { '#u': 'userId' },
+                    ExpressionAttributeValues: { ':u': userId }
+                } : {})
+            }));
+            return true;
+        } catch (error) {
+            if (error.name === 'ConditionalCheckFailedException') return false;
+            throw error;
+        }
     }
 
     // Query: the history of one key result, newest first, only the caller's rows
@@ -46,7 +67,7 @@ function createCheckinsRepo({ table = process.env.CHECKINS_TABLE, client } = {})
         return page.Items || [];
     }
 
-    return { create, remove, listByKr };
+    return { create, get, remove, listByKr };
 }
 
 module.exports = { createCheckinsRepo, KR_INDEX, USER_INDEX };

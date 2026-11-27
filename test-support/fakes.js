@@ -8,7 +8,11 @@ function fakeRepo() {
     return {
         rows,
         async create(c) { rows.set(c.checkInId, copy(c)); return c; },
-        async remove(id) { rows.delete(id); },
+        async get(id) { return copy(rows.get(id)); },
+        async remove(id, userId) {
+            if (userId && rows.get(id)?.userId !== userId) return false;
+            return rows.delete(id);
+        },
         async listByKr(krId, userId) {
             return [...rows.values()].filter((c) => c.krId === krId && c.userId === userId)
                 .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(copy);

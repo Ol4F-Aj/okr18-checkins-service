@@ -50,6 +50,7 @@ function createApp({ repo, kr, goals, events, verify, now, allowedOrigins = [], 
     router.use(requireUser(verify));                     // every route below needs a login
     router.post('/check-ins', checkins.logCheckIn);
     router.get('/check-ins', checkins.listCheckIns);
+    router.delete('/check-ins/:checkInId', checkins.undoCheckIn);
     app.use('/api', router);
 
     app.use((req, res) => sendError(res, 404, 'ROUTE_NOT_FOUND', 'Route not found.'));

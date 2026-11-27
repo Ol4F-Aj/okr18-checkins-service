@@ -16,7 +16,7 @@ What this service must provide is in section 5 of the
 | Rules C1, C2 (`src/rules.js`, tested) | done |
 | Check-in routes, `CheckIns` table, publish `check-in.logged` | done |
 | `scripts/deploy.sh` for Floci, `checkins-role`, end-to-end test | done |
-| Undo (`check-in.undone`), queue `checkins-inbox` | next |
+| Undo: `DELETE /api/check-ins/{id}` within 24 h, publishes `check-in.undone` (rule C3) | done |
 | Evidence uploads (S3 presigned POST, 2 MB, image/PDF) | to do |
 | Weekly digest (SES + Scheduler, Mondays 08:00 Cairo) | to do |
 | Admin API: `GET /api/admin/users` (`admin` group only, Lambda `admin-api`, `admin-role`), ST4 script | done |
@@ -27,6 +27,7 @@ What this service must provide is in section 5 of the
 | --- | --- |
 | C1 | Before logging: the key result must exist and be mine (else 404), its goal must be Active or AtRisk (else 409) |
 | C2 | The value fits the key result: a number; percentage 0–100; milestone 0 or 1. Note optional, max 500 characters |
+| C3 | Undo: only my own check-in (else 404), within 24 hours (else 409 UNDO_TOO_LATE), only my latest on that key result (else 409 NOT_LATEST), goal still Active or AtRisk (else 409) |
 
 ## Endpoints
 
@@ -35,6 +36,7 @@ What this service must provide is in section 5 of the
 | GET /api/check-ins/health | | 200 `{status:"ok",service:"checkins"}` | |
 | POST /api/check-ins | `{ krId, value, note? }` | 201 check-in, publishes `check-in.logged` | 400 VALIDATION_ERROR, 401, 404 KR_NOT_FOUND, 409 GOAL_NOT_ACTIVE, 413, 415, 503 |
 | GET /api/check-ins?krId=KR-... | | 200 my check-ins for that key result, newest first | 400, 401 |
+| DELETE /api/check-ins/CI-... | | 200 `{undone, krId, value}`, publishes `check-in.undone`: Key Results puts `previousValue` back | 400, 401, 404 CHECKIN_NOT_FOUND, 409 UNDO_TOO_LATE, NOT_LATEST, GOAL_NOT_ACTIVE, 503 |
 | GET /api/admin/health | | 200 `{status:"ok",service:"admin"}` | |
 | GET /api/admin/users | | 200 `{count, users:[{userId,email,status,enabled,admin,createdAt}]}`: accounts only, no goals | 401, 403 FORBIDDEN (not in the `admin` group), 503 |
 
@@ -55,7 +57,7 @@ server.js              runs it on a PC: npm run dev  (port 3003)
 handlers/api.js        Lambda checkins-api (API Gateway -> Express via serverless-http)
 handlers/admin.js      Lambda admin-api
 src/createApp.js       builds the Express app (log, CORS, JSON, login, routes, errors)
-src/rules.js           business rules C1, C2, pure functions
+src/rules.js           business rules C1, C2, C3, pure functions
 src/checkinsController.js  request -> rules -> other services -> data -> event -> response
 src/checkinsRepo.js    the only file that talks to DynamoDB (CheckIns)
 src/internalClients.js calls kr-internal and goals-internal (direct Lambda invoke)
@@ -90,13 +92,14 @@ npm test
 
 The last step prints the health answer (200) and a request without login (401).
 With Goals and Key Results deployed too, `bash scripts/e2e.sh` runs the whole flow:
-check-in refused on a Draft goal (409), Activate, two check-ins, Key Results' `current` moves, Achieve.
+check-in refused on a Draft goal (409), Activate, two check-ins, Key Results' `current` moves, undo (older one 409,
+latest one puts `current` back), log again, Achieve.
 `bash scripts/st4.sh` runs security test ST4 against `admin-api` with a normal user and an admin user.
 
 ## AWS services used here
 
 Lambda (`checkins-api`, `admin-api`), DynamoDB (table `CheckIns`, KMS-encrypted, indexes `krId-createdAt-index` and
-`userId-createdAt-index`), API Gateway (7 routes on `okr18-api`), SNS (`check-in.logged` on `okr-events`),
+`userId-createdAt-index`), API Gateway (9 routes on `okr18-api`), SNS (`check-in.logged` and `check-in.undone` on `okr-events`),
 CloudWatch Logs (kept 7 days), IAM (`checkins-role`: own table, publish to `okr-events`,
 invoke only `kr-internal` and `goals-internal`, own logs; `admin-role`: only `ListUsers` and
 `ListUsersInGroup` on the `okr18-users` pool and its own logs), Cognito (the `admin` group decides who gets in).

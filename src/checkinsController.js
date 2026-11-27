@@ -4,11 +4,12 @@
 // Dependencies are passed in (repo, kr, goals, events, now) so tests can use fakes.
 // ---------------------------------------------------------------
 const { randomUUID } = require('crypto');
-const { checkKeyResult, checkGoal, checkValue, checkNote } = require('./rules');
+const { checkKeyResult, checkGoal, checkValue, checkNote, checkUndo } = require('./rules');
 const { DependencyError } = require('./internalClients');
 const { sendError } = require('./http');
 
 const KR_ID = /^KR-[0-9a-f-]{36}$/i;   // the ids Key Results creates
+const CI_ID = /^CI-[0-9a-f-]{36}$/i;   // the ids this service creates
 
 function createCheckinsController({ repo, kr, goals, events, now = () => new Date() }) {
 
@@ -78,7 +79,41 @@ function createCheckinsController({ repo, kr, goals, events, now = () => new Dat
         return res.status(200).json(await repo.listByKr(krId, req.user.id));
     }
 
-    return { logCheckIn, listCheckIns };
+    // DELETE /api/check-ins/{checkInId}   undo my latest check-in within 24 hours (C3)
+    async function undoCheckIn(req, res) {
+        const userId = req.user.id;
+        const { checkInId } = req.params;
+        if (!CI_ID.test(checkInId)) return sendError(res, 400, 'VALIDATION_ERROR', 'checkInId must be a check-in id.');
+
+        const checkIn = await repo.get(checkInId);
+        const [latest] = checkIn && checkIn.userId === userId ? await repo.listByKr(checkIn.krId, userId, 1) : [];
+        const undoCheck = checkUndo(checkIn, userId, latest, now());
+        if (!undoCheck.ok) return sendError(res, undoCheck.status, undoCheck.code, undoCheck.message);
+
+        // Same as C1: progress only changes while the goal is in play
+        const goal = await goals.getGoalStatus(checkIn.goalId);
+        const goalCheck = checkGoal(goal, userId);
+        if (!goalCheck.ok) {
+            const message = goalCheck.status === 409 ? `Check-ins can only be undone while the goal is Active or At risk (it is ${goal.status}).` : goalCheck.message;
+            return sendError(res, goalCheck.status, goalCheck.code, message);
+        }
+
+        // Delete only if it is still mine (a second click finds nothing: 404)
+        if (!await repo.remove(checkInId, userId)) {
+            return sendError(res, 404, 'CHECKIN_NOT_FOUND', 'Check-in not found.');
+        }
+
+        // Tell Key Results to put previousValue back. If that fails, restore the row.
+        try {
+            await events.publish('check-in.undone', userId, { krId: checkIn.krId, previousValue: checkIn.previousValue });
+        } catch (error) {
+            await repo.create(checkIn);
+            throw new DependencyError(`Event could not be published (${error.name}).`);
+        }
+        return res.status(200).json({ undone: checkIn.checkInId, krId: checkIn.krId, value: checkIn.previousValue });
+    }
+
+    return { logCheckIn, listCheckIns, undoCheckIn };
 }
 
 module.exports = { createCheckinsController };

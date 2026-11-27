@@ -3,6 +3,7 @@
 # End-to-end test on Floci, through API Gateway, with a real Cognito login:
 #   goal (Draft) -> key result -> check-in refused (C1, 409)
 #   -> Activate -> two check-ins (201) -> Key Results' current moves (events)
+#   -> undo: older one refused (409), latest one undone (current goes back) -> log again
 #   -> history -> Achieve
 # Needs Goals, Key Results and Check-ins deployed (okr18-frontend: bash infra/deploy-all.sh).
 # Run from this repo's folder in Git Bash:   bash scripts/e2e.sh
@@ -36,15 +37,25 @@ echo "2. activate the goal"
 api POST "/api/goals/$GOAL_ID/transitions" '{"to":"Active"}' | field o.status
 
 echo "3. two check-ins: 4 then 10 (expect previousValue 0 then 4)"
-api POST /api/check-ins "{\"krId\":\"$KR_ID\",\"value\":4,\"note\":\"first run\"}" | field 'o.previousValue + " -> " + o.value'
-api POST /api/check-ins "{\"krId\":\"$KR_ID\",\"value\":10}" | field 'o.previousValue + " -> " + o.value'
+FIRST_ID=$(api POST /api/check-ins "{\"krId\":\"$KR_ID\",\"value\":4,\"note\":\"first run\"}" | field 'console.error("   " + o.previousValue + " -> " + o.value), o.checkInId')
+LAST_ID=$(api POST /api/check-ins "{\"krId\":\"$KR_ID\",\"value\":10}" | field 'console.error("   " + o.previousValue + " -> " + o.value), o.checkInId')
 
 echo "4. key result after the events reach Key Results (expect current 10, Completed)"
 sleep 6
 api GET "/api/key-results/$KR_ID" | field 'JSON.stringify({ current: o.current, status: o.status, progress: o.progress })'
 
-echo "5. history, newest first"
+echo "5. undo the older check-in (C3: only the latest, expect 409 NOT_LATEST)"
+api DELETE "/api/check-ins/$FIRST_ID" | field 'o.error ? o.error.code : "UNEXPECTED " + JSON.stringify(o)'
+
+echo "6. undo the latest check-in (expect 200, check-in.undone puts current back to 4)"
+api DELETE "/api/check-ins/$LAST_ID" | field 'JSON.stringify(o)'
+sleep 6
+api GET "/api/key-results/$KR_ID" | field 'JSON.stringify({ current: o.current, status: o.status, progress: o.progress })'
+
+echo "7. log 10 again, then the history, newest first"
+api POST /api/check-ins "{\"krId\":\"$KR_ID\",\"value\":10}" | field 'o.previousValue + " -> " + o.value'
+sleep 6
 api GET "/api/check-ins?krId=$KR_ID" | field 'o.map((c) => c.previousValue + " -> " + c.value).join(", ")'
 
-echo "6. achieve the goal (needs 100%: expect Achieved)"
+echo "8. achieve the goal (needs 100%: expect Achieved)"
 api POST "/api/goals/$GOAL_ID/transitions" '{"to":"Achieved"}' | field 'o.status || JSON.stringify(o)'

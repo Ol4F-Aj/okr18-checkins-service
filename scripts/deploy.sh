@@ -131,6 +131,8 @@ if [ -n "${API_ID:-}" ]; then
   add_route "GET /api/check-ins" yes "$API_INT"
   # CORS preflight: the browser asks OPTIONS first for requests with a token; Express cors() answers
   add_route "OPTIONS /api/check-ins" no "$API_INT"
+  add_route "DELETE /api/check-ins/{checkInId}" yes "$API_INT"       # undo (rule C3)
+  add_route "OPTIONS /api/check-ins/{checkInId}" no "$API_INT"
 
   ADMIN_INT=$(integration_for $FN_ADMIN)
   add_route "GET /api/admin/health" no "$ADMIN_INT"

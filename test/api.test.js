@@ -201,3 +201,89 @@ test('history: my check-ins newest first, another user sees none', async () => {
     const bad = await call(w.app, 'GET', '/api/check-ins', { token: 'token-a' });
     assert.equal(bad.status, 400);
 });
+
+// ---------- C3: undo ----------
+// A clock the test can move: each call is one minute later, plus any jump the test adds
+function clock() {
+    const c = { t: Date.UTC(2026, 10, 1) };
+    c.now = () => new Date(c.t += 60000);
+    c.later = (ms) => { c.t += ms; };
+    return c;
+}
+function undoWorld() {
+    const w = world();
+    w.clock = clock();
+    w.app = createApp({ ...w, verify: fakeVerify, now: w.clock.now });
+    return w;
+}
+const log = (w, value) => call(w.app, 'POST', '/api/check-ins', { token: 'token-a', body: { krId: KR1, value } });
+
+test('undo my latest check-in: 200, row gone, check-in.undone with previousValue', async () => {
+    const w = undoWorld();
+    await log(w, 4);
+    const second = await log(w, 7);
+    const res = await call(w.app, 'DELETE', `/api/check-ins/${second.body.checkInId}`, { token: 'token-a' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { undone: second.body.checkInId, krId: KR1, value: 4 });
+    assert.equal(w.repo.rows.size, 1);
+    assert.deepEqual(w.events.sent.at(-1), { type: 'check-in.undone', userId: 'user-a', data: { krId: KR1, previousValue: 4 } });
+});
+
+test('undo: another user\'s check-in or an unknown id is 404; a bad id is 400', async () => {
+    const w = undoWorld();
+    const mine = await log(w, 4);
+    const theirs = await call(w.app, 'DELETE', `/api/check-ins/${mine.body.checkInId}`, { token: 'token-b' });
+    assert.equal(theirs.status, 404);
+    assert.equal(theirs.body.error.code, 'CHECKIN_NOT_FOUND');
+    const unknown = await call(w.app, 'DELETE', '/api/check-ins/CI-00000000-0000-0000-0000-000000000000', { token: 'token-a' });
+    assert.equal(unknown.status, 404);
+    const bad = await call(w.app, 'DELETE', '/api/check-ins/nope', { token: 'token-a' });
+    assert.equal(bad.status, 400);
+    assert.equal(w.repo.rows.size, 1);
+});
+
+test('undo after 24 hours is 409 UNDO_TOO_LATE', async () => {
+    const w = undoWorld();
+    const c = await log(w, 4);
+    w.clock.later(24 * 60 * 60 * 1000);
+    const res = await call(w.app, 'DELETE', `/api/check-ins/${c.body.checkInId}`, { token: 'token-a' });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'UNDO_TOO_LATE');
+    assert.equal(w.repo.rows.size, 1);
+});
+
+test('undo an older check-in (not the latest) is 409 NOT_LATEST', async () => {
+    const w = undoWorld();
+    const first = await log(w, 4);
+    await log(w, 7);
+    const res = await call(w.app, 'DELETE', `/api/check-ins/${first.body.checkInId}`, { token: 'token-a' });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'NOT_LATEST');
+});
+
+test('undo when the goal is no longer Active is 409 GOAL_NOT_ACTIVE', async () => {
+    const w = undoWorld();
+    const c = await log(w, 10);
+    w.goals.state.goals['G-1'].status = 'Achieved';
+    const res = await call(w.app, 'DELETE', `/api/check-ins/${c.body.checkInId}`, { token: 'token-a' });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.error.code, 'GOAL_NOT_ACTIVE');
+    assert.equal(w.repo.rows.size, 1);
+});
+
+test('undo twice: the second one is 404', async () => {
+    const w = undoWorld();
+    const c = await log(w, 4);
+    await call(w.app, 'DELETE', `/api/check-ins/${c.body.checkInId}`, { token: 'token-a' });
+    const again = await call(w.app, 'DELETE', `/api/check-ins/${c.body.checkInId}`, { token: 'token-a' });
+    assert.equal(again.status, 404);
+});
+
+test('undo when the event cannot be sent: 503 and the check-in is put back', async () => {
+    const w = undoWorld();
+    const c = await log(w, 4);
+    w.events.state.down = true;
+    const res = await call(w.app, 'DELETE', `/api/check-ins/${c.body.checkInId}`, { token: 'token-a' });
+    assert.equal(res.status, 503);
+    assert.equal(w.repo.rows.size, 1);
+});
